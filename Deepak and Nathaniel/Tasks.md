@@ -2,7 +2,7 @@
 
 * **Summer Camp Support**
   * **Robotic Kits**
-    * [ ] Help assemble the robotic kits to make sure that all robots are assembled and can do the basic manuver (keyboard control).
+    * [X] Help assemble the robotic kits to make sure that all robots are assembled and can do the basic manuver (keyboard control).
     * [ ] Lingxiao needs to return the SD card with the new image.
     * [ ] **06-11-2025** Try the following tutorials:
       * [ ] [Obstcale Avoidance](https://docs.sunfounder.com/projects/picar-x/en/latest/python/python_avoid.html)
