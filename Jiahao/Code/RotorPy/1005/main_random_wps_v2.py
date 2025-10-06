@@ -1,36 +1,5 @@
 """
 --------------------------------------------------
-- 创建 RotorPy 的四旋翼仿真环境（QuadrotorEnv，control_mode='cmd_vel'）。
-- 无限循环 while True 中，依次生成“随机航点”（共 NUM_RANDOM_WP 个），
-  使用简单的比例控制器（P 控制）产生速度指令 v_cmd，使无人机朝当前航点运动。
-- 对于每个航点：
-  * 若在距离阈值 WP_TOL 内到达 -> 记录 REACH 并进入短暂悬停阶段；
-  * 若超过 MAX_TIME_PER_WP 未到达 -> 记录 TIMEOUT 并跳过此航点；
-  * 若仿真返回 done（撞边界/到时） -> 执行“重入”（reset+状态注入+探测 step），
-    以当前状态为参考把无人机“放回场景”，尽量继续当前航点；重入次数超过上限则跳过此航点。
-- 全程按固定步长 DT_GLOBAL 推进时间，并把每一步的状态/指令写入内存列表 rows，
-  最后统一调用 viz_and_io.py 输出 CSV 与图像/动画。
-
-文件间职责
---------------------------------------------------
-- config_drone.py：可调整参数（时间、速度、阈值、随机范围、输出文件名等）。
-- viz_and_io.py：绘图与保存（CSV、平面图、3D 图、3D 动画）。
-- main_random_wps.py（本文件）：仅保留“控制逻辑 + 重入 + 日志采集 + 调用输出”。
-
-数据流/关键变量
---------------------------------------------------
-- obs：环境返回的观测（dict 或 ndarray）。我们只用到“位置 x/position 与速度 v/velocity”。
-- DroneState：便捷结构，封装 pos/vel（均为 shape=(3,) 的 numpy 向量）。
-- t_s：仿真时间（秒），每一步累加 DT_GLOBAL。用于日志与时间阈值判断。
-- rows：逐步累积的日志行（字符串），最后交给 save_csv。
-- rand_waypoints：用于绘图展示的航点列表（np.array，形如 [x,y,z]）。
-
-注意事项
---------------------------------------------------
-- “done”产生的原因比较多。此处通过 _done_reason 进行粗略判断（时间上限、世界边界）。
-- “重入”是一个工程性手段：试图用 env.reset()+状态注入+探测 step 找到“稳定的”起点继续仿真。
-- 本逻辑为教学/实验性质，易读性优先；如果需要更高的物理/控制精度，建议替换为姿态/速度/位置闭环控制器。
-- 本文件默认中文注释，便于逐行理解。
 """
 
 import time
@@ -55,9 +24,6 @@ from viz_and_io import plot_static, render_3d_animation, save_csv
 
 class DroneState:
     """
-    轻量级状态结构：仅包含位置 pos 与速度 vel。
-    - pos: np.ndarray, shape=(3,), 单位 m
-    - vel: np.ndarray, shape=(3,), 单位 m/s
     """
     __slots__ = ("pos", "vel")
     def __init__(self, pos: np.ndarray, vel: np.ndarray):
@@ -67,10 +33,6 @@ class DroneState:
 
 def _get_state_from_obs(obs, idx: int = 0) -> DroneState:
     """
-    从环境观测 obs 中提取 DroneState。
-    兼容两种常见结构：
-      - dict: obs["x"][i], obs["v"][i] 或 obs["position"][i], obs["velocity"][i]
-      - ndarray: obs[i, :6] -> [x,y,z,vx,vy,vz]
     """
     if isinstance(obs, dict):
         if "x" in obs and "v" in obs:
@@ -88,8 +50,7 @@ def _get_state_from_obs(obs, idx: int = 0) -> DroneState:
 
 def ensure_env_double(env) -> None:
     """
-    若环境内部使用了 torch.Tensor，这里尽量把 inertia / vehicle_states 等切到 double，
-    避免 float32 带来的小误差放大（该函数是“尽力而为”，失败不会中断）。
+
     """
     try:
         if hasattr(env, "quadrotors") and hasattr(env.quadrotors, "params"):
@@ -108,11 +69,10 @@ def ensure_env_double(env) -> None:
 
 def p_vel_to_waypoint(pos: np.ndarray, wp: np.ndarray, kp: float = C.KP, vmax: float = C.VMAX) -> np.ndarray:
     """
-    位置 -> 速度（P 控制）：v_cmd = kp * (wp - pos)，并在范数上限处做饱和（<= VMAX）。
     - pos: 当前无人机位置
     - wp : 当前目标航点
-    - kp : P 控制增益（影响“起步/响应”快慢）
-    - vmax: 指令速度上限（影响巡航上限与快速到达能力）
+    - kp : P 控制
+    - vmax: 指令速度上限
     """
     v = kp * (wp - pos).astype(np.float64)
     n = np.linalg.norm(v)
@@ -122,7 +82,7 @@ def p_vel_to_waypoint(pos: np.ndarray, wp: np.ndarray, kp: float = C.KP, vmax: f
 
 
 def speed_norm(vel: np.ndarray) -> float:
-    """返回速度模长 |v|，仅用于日志打印。"""
+    """返回速度模长 |v|"""
     return float(np.linalg.norm(np.asarray(vel, dtype=np.float64)))
 
 
@@ -138,7 +98,6 @@ def _safe_quat_to_numpy(q):
 
 def _any_done(d):
     """
-    统一判断环境的 done（可能是 bool，也可能是 numpy 向量）。
     - True 表示此步需要重置/重入（可能撞边界、时间耗尽等）。
     """
     return (isinstance(d, bool) and d) or (isinstance(d, np.ndarray) and np.any(d))
@@ -155,14 +114,12 @@ def _clip_to_world(p: np.ndarray) -> np.ndarray:
 
 def _force_inject_state(env, init: Dict[str, np.ndarray]):
     """
-    强行把“我们想要的状态”注入到环境的 vehicle_states 里（工程 workaround）：
     - 在 env.reset() 之后调用：
-        x / position        <- 初始位置 (1,3)
-        v / velocity        <- 初始速度 (1,3)
-        q                   <- 初始姿态四元数 (1,4)
-        w, wind, rotor_speeds <- 清零
-    - 返回值：一个“类似 obs”的字典（含 x/v），用于后续继续 step。
-    - 若失败，打印告警但不中断。
+        x / position       
+        v / velocity       
+        q                  
+        w, wind, rotor_speeds 
+
     """
     try:
         vs = env.vehicle_states
@@ -200,21 +157,8 @@ def _safe_reset_and_inject_with_probe(
     init_shrink: Optional[float] = None
 ):
     """
-    “重入”策略（核心思想：reset -> 注入 -> 探测 step）
-    --------------------------------------------------
     目标：在 done 之后，让无人机尽量“接近原来状态”或“朝向航点的合理位置”继续飞，
           而不是重新从环境默认原点起飞，避免实验被意外打断。
-
-    参数说明：
-    - st_like:      参考状态（通常取 done 前的最后状态）
-    - wp_anchor_xy: 若 anchor_mode='toward_wp'，我们用这个航点的 XY 来作为锚点，
-                    把 st_like 在 XY 上“拉”向航点，以期减少下一步的距离；
-                    若为 None 或 anchor_mode='hold_xy'，则维持原 XY。
-    - max_tries:    注入后的“探测 step”尝试次数。若 done 仍触发，则缩小位移（shrink）再试。
-    - anchor_mode:  'toward_wp'（朝向航点锚定），或 'hold_xy'（保持当前位置为锚点）。
-    - init_shrink:  初始缩放（默认 0.9）。每次失败后乘以 REENTRY_SHRINK_FACTOR 继续尝试。
-
-    返回值：成功后的“可用观测”（obs-like），或最后一次注入的观测。
     """
     try:
         q_now = _safe_quat_to_numpy(env.vehicle_states["q"][0])
@@ -314,10 +258,6 @@ def gen_random_wp() -> np.ndarray:
 
 def main():
     """
-    1) 创建并 reset 环境；
-    2) while True：逐个生成随机航点并跟踪；
-    3) 记录/打印每一阶段（追踪/到达/超时/重入/悬停）；
-    4) 结束后统一输出 CSV、图像与动画。
     """
     print("[START] main_random_wps")
 
@@ -348,11 +288,6 @@ def main():
 
     def log_state(t_s: float, phase: str, st: DroneState, wp=None, v_cmd=None):
         """
-        把当前状态/指令写入 rows。
-        - phase：阶段标记，如 "TRACK_WP_3" / "REACH_WP_3" / "TIMEOUT_WP_3" / "HOVER_WP_3" 等，便于 CSV 后处理。
-        - speed：即时速度模长，便于观察速度变化。
-        - wp_* ：当前目标航点（为空字符串表示本步没有目标，例如最终悬停）。
-        - v_cmd_*：本步发送的速度指令（为空字符串表示本步未发指令或为 0）。
         """
         rows.append([
             f"{t_s:.2f}", phase,
@@ -368,11 +303,11 @@ def main():
         ])
 
     # 5) 主循环：按固定步长推进仿真时间
-    DT = C.DT_GLOBAL  # 时间步长（秒）
-    t_s = 0.0         # 仿真时间（秒，累加 DT）
+    DT = C.DT_GLOBAL  # 时间步长
+    t_s = 0.0         # 仿真时间
 
     rand_waypoints: List[np.ndarray] = []  
-    wp_count = 0                           # 航点计数
+    wp_count = 0                        
 
     while True:
         # 5.1) 终止条件：达到目标数量则 break
@@ -435,13 +370,12 @@ def main():
             t_s += DT
             step += 1
 
-            # ---- done 处理：触发“重入”机制 ----
+            # ---- done 处理
             if _any_done(done):
-                # ① 诊断 done 原因（可选打印，仅供排查）
+                # ① 诊断 done 原因（
                 reason = _done_reason(env, _get_state_from_obs(obs, 0) if isinstance(obs,(dict,np.ndarray)) else None)
 
-                # ② 保护窗：刚刚做过重入的 MIN_RUN_AFTER_REENTRY 时间窗口内，如果再次 done，
-                #    不累计重入次数（short=True），防止边界条件导致无意义的“连环重入”。
+                # 刚刚做过重入的 MIN_RUN_AFTER_REENTRY 时间窗口内，如果再次 done，
                 short = (t_last_reentry is not None) and ((t_s - t_last_reentry) < C.MIN_RUN_AFTER_REENTRY)
                 if not short:
                     reentry_count += 1
@@ -460,7 +394,7 @@ def main():
                     log_state(t_s, f"SKIP_WP_{wp_count}", st, wp=wp, v_cmd=np.array([0,0,0], np.float64))
                     break
 
-            # ---- 控制“仿真墙钟速度”：便于视觉观察。若追求纯计算速度可注释掉 ----
+            
             time.sleep(DT)
 
         # 5.4) 到达后的短暂悬停
