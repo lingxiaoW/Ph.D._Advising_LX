@@ -3,7 +3,6 @@
 https://github.com/Hammerling-Research-Group/FastGaussianPuff
 用 Python 实现“Fast Implementation of the Gaussian Puff Forward Atmospheric Model”
 
-【与 FGP 的概念映射（Concept mapping to FGP）】
 - Geometry：
   - FGP：支持规则网格与“稀疏点（points-in-space）”两类几何。
   - 使用规则 2D 网格的“固定高度切片 z = const”来绘制热图（可看作 grid-geometry 的一个切片）。
