@@ -4,29 +4,25 @@ https://github.com/Hammerling-Research-Group/FastGaussianPuff
 用 Python 实现“Fast Implementation of the Gaussian Puff Forward Atmospheric Model”
 
 【与 FGP 的概念映射（Concept mapping to FGP）】
-- Geometry（几何）：
+- Geometry：
   - FGP：支持规则网格与“稀疏点（points-in-space）”两类几何。
-  - 本脚本：使用规则 2D 网格的“固定高度切片 z = const”来绘制热图（可看作 grid-geometry 的一个切片）。
-- Emission（排放/源）：
+  - 使用规则 2D 网格的“固定高度切片 z = const”来绘制热图（可看作 grid-geometry 的一个切片）。
+- Emission源：
   - FGP：Emission 对象包含源位置、排放率、起止时刻等；以固定间隔生成 puff（puff_dt）。
-  - 本脚本：SRC 为源位置；Q_PUFF 为单个 puff 的“量”；PUFF_DT 控制释放间隔（t_since_emit 达阈值则释放）。
-- Wind series（风场/时间序列）：
+  - SRC 为源位置；Q_PUFF 为单个 puff 的“量”；PUFF_DT 控制释放间隔（t_since_emit 达阈值则释放）。
+- Wind series（风场）：
   - FGP：接受时间戳等间隔的风速/风向序列，内部插值到仿真步长。
-  - 本脚本：通过 wind_vec_at(t) 构造“随时间变化的风向”，含两种模式（正弦摆动/随机游走）；可轻松改成读取你的 CSV。
+  - 通过 wind_vec_at(t) 构“随时间变化的风向
 - Time parameters（时间参数）：
   - FGP：sim_dt（仿真步）、puff_dt（脉冲发射间隔）、obs_dt/output_dt（观测/输出间隔）。
-  - 本脚本：SIM_DT、PUFF_DT、OUT_EVERY（每几步输出一帧）对应 sim_dt/puff_dt/output_dt 的思想。
-- Physics/Kernel（核心核函数）：
+  - SIM_DT、PUFF_DT、OUT_EVERY（每几步输出一帧）对应 sim_dt/puff_dt/output_dt 
+- Physics/Kernel（核心核函数）（原版为c++）：
   - FGP：C++ 高性能核；含阈值裁剪、低风跳过（skip_low_wind）、exp_thresh_tolerance、unsafe 等加速/近似开关。
-  - 本脚本：纯 Python 的 cp_concentration() 叠加，不做阈值裁剪与近似开关（方便阅读与验证逻辑）。
+  - Python 的 cp_concentration() 叠加
 - I/O/Plot（输出/可视化）：
   - FGP：demo 里用 Matplotlib/GIF；常见的图形后端在 Linux/macOS 友好，Windows 建议离屏渲染。
-  - 本脚本：强制使用 Agg 离屏后端（matplotlib.use("Agg")），避免 Windows/WSL 的 Qt/Wayland 问题。
+  - 强制使用 matplotlib.use("Agg")
 
-【可迁移性/升级建议】
-- 想接 FGP：保留“概念一致”的函数签名与数据组织（Geometry/Emission/Wind/TimeParams），把 cp_concentration 与 advect_and_age
-  等替换为 FGP 暴露的 Python 绑定调用（C++ 后端）。
-- 想提速（Windows 仍纯 Python）：给 cp_concentration/叠加循环加 numba.njit 并做批量向量化。
 """
 
 import os
@@ -34,7 +30,7 @@ import math
 import numpy as np
 import imageio.v2 as imageio
 import matplotlib
-matplotlib.use("Agg")  # 【与 FGP 的可视化实践一致】离屏渲染，避免 GUI 依赖/后端冲突（Windows/WSL 更稳）
+matplotlib.use("Agg")  # 离屏渲染
 import matplotlib.pyplot as plt
 
 # 1)可调参数
