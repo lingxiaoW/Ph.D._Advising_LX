@@ -1,40 +1,28 @@
-# puff_plume.py
-# -*- coding: utf-8 -*-
-"""
-PuffPlume: 从 gasplume_puff_3d.py 提炼的可调用羽流类
-提供:
-  - step(dt): 推进内部时间，按 SIM_DT 节拍做对流、老化、发射
-  - sample(x, y, z): 采样当前时刻指定点的浓度
-  - slice2d(z, dx=None, dy=None): 计算给定 z 的二维浓度切片 (X, Y, C)
-说明:
-  - 单位与原脚本一致：米、秒
-  - 风场：默认 (U_MEAN, 0)，可自定义 wind_vec_at()
-"""
+
 
 from __future__ import annotations
 import math
 import numpy as np
 from typing import List, Tuple
 
-# ==== 域范围（与原脚本一致/兼容） ====
+# ==== 域范围
 Xmin, Xmax = -50.0, 300.0
 Ymin, Ymax = -150.0, 150.0
 
-# 网格缺省分辨率（仅用于 slice2d）
 DX = DY = 2.0
 
-# 源与排放/风参数（与原脚本一致/兼容）
+# 源与排放/风参数
 SRC = np.array([0.0, 0.0, 1.5], dtype=float)
-Q_PUFF = 50.0       # 单个 puff 的标称强度（任意单位）
+Q_PUFF = 50.0       
 U_MEAN  = 2.0       # 平均风速（x方向）
 A_Y = 1.2           # 横向扩散系数
 A_Z = 0.8           # 垂向扩散系数
 
-# 模拟节拍（保持与你的脚本一致）
+# 
 SIM_DT  = 1.0       # plume 物理推进步长
 PUFF_DT = 5.0       # 发射间隔
 
-# 可选：百分位上限用于可视化归一（不影响数值采样）
+
 PERC_FOR_VMAX = 99.5
 
 
@@ -95,7 +83,7 @@ class PuffPlume:
     def _emit_if_needed(self, step_dt, Ux, Uy):
         self._since_emit += step_dt
         if self._since_emit >= self.puff_dt:
-            # 新 puff，从源位置开始，给一个极小 age 以避免 sig=0
+            
             self.puffs.append([float(self.src[0]), float(self.src[1]), float(self.src[2]), 1e-6])
             self._since_emit = 0.0
 
@@ -130,8 +118,7 @@ class PuffPlume:
         """采样当前时刻 (x,y,z) 的浓度（所有 puff 线性叠加）"""
         if len(self.puffs) == 0:
             return 0.0
-        # 向量化计算：对每个 puff 叠加
-        # 这里为了简洁，直接循环累加；若性能不足，可做邻域过滤或向量化堆叠
+      
         c = 0.0
         for p in self.puffs:
             c += float(cp_concentration(np.array([x]), np.array([y]), np.array([z]), p, self.q_puff)[0])
