@@ -61,7 +61,7 @@ def _resolve_q_puff() -> float:
         return float(getattr(plume, "Q_PUFF"))
     raise AttributeError("Neither PUFF_Q nor Q_PUFF found in gasplume_xy_final.py")
 
-#######* Input: (x, y, z) *
+###### Input: (x, y, z) 
 def sensor_reading(
     x: float,
     y: float,
@@ -70,12 +70,22 @@ def sensor_reading(
     *,
     puffs_override: Optional[Iterable[Sequence[float]]] = None,
     degrees: bool = True,) -> Tuple[float, float, float]:
-    """
-    在 (x,y,z,t) 处返回：(浓度 c，风速 v，风向 phi)。
-    """
+
     # 风场
+    #   wind_vec_at(t) → 返回风在水平面的分量 (Ux, Uy)
+    # 
+    #   Ux: 风在 +X 方向的速度分量 [m/s]
+    #   Uy: 风在 +Y 方向的速度分量 [m/s]
+    #   wind_v = sqrt(Ux^2 + Uy^2)
     Ux, Uy = plume.wind_vec_at(t)
     v = math.hypot(Ux, Uy)
+
+    #       wind_phi = atan2(Uy, Ux)
+    #       (再由弧度转换为角度: degrees(wind_phi))
+    #       0°   → 风朝 +X 方向
+    #       90°  → 风朝 +Y 方向
+    #      -90°  → 风朝 -Y 方向
+    #      ±180° → 风朝 -X 方向
     phi = math.degrees(math.atan2(Uy, Ux)) if degrees else math.atan2(Uy, Ux)
 
     # 浓度
